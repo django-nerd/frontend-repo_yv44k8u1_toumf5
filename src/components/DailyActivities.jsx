@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Plus, CalendarCheck2 } from 'lucide-react';
+import { CheckCircle2, Plus, CalendarCheck2, Sun, Moon, Sunset } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const STORAGE_KEY = 'mindmate_activities';
@@ -18,7 +18,6 @@ function loadAllActivities() {
 function saveAllActivities(list) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-    // Notify other parts of the app (e.g., Chat) that activities changed
     window.dispatchEvent(new CustomEvent('mindmate-activities-updated'));
   } catch {}
 }
@@ -38,6 +37,13 @@ const QUICK = [
   'Rest',
 ];
 
+function getDaypartFromHour(hour) {
+  if (hour >= 5 && hour < 11) return 'morning';
+  if (hour >= 11 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 21) return 'evening';
+  return 'night';
+}
+
 export default function DailyActivities() {
   const [note, setNote] = useState('');
   const [selected, setSelected] = useState([]);
@@ -49,7 +55,6 @@ export default function DailyActivities() {
   );
 
   useEffect(() => {
-    // Sync if storage changes from another tab
     const onStorage = (e) => {
       if (e.key === STORAGE_KEY) setItems(loadAllActivities());
     };
@@ -87,7 +92,7 @@ export default function DailyActivities() {
             <CalendarCheck2 className="h-6 w-6" /> Daily Activities
           </h2>
         </div>
-        <p className="text-gray-600 dark:text-gray-400 mb-4">Log what you did today. Your chat will gently reflect your day.</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">Log what you did today. Your chat will gently reflect your day, and the layout adapts with time.</p>
 
         <div className="rounded-2xl border border-black/10 dark:border-white/10 bg-white/60 dark:bg-neutral-900/60 backdrop-blur p-4">
           <div className="flex flex-wrap gap-2 mb-3">
@@ -125,31 +130,36 @@ export default function DailyActivities() {
             {todays.length === 0 && (
               <p className="text-sm text-gray-600 dark:text-gray-400">No activities yet today. Add a couple — even small things count.</p>
             )}
-            {todays.map((a) => (
-              <motion.div
-                key={a.id}
-                initial={{ opacity: 0, y: 8 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.3 }}
-                className="rounded-xl border border-black/10 dark:border-white/10 p-3 bg-white/70 dark:bg-neutral-800/70"
-              >
-                <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-                  <span>Today</span>
-                  <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><CheckCircle2 className="h-4 w-4" /> logged</span>
-                </div>
-                <div className="mt-1 text-gray-800 dark:text-gray-100">
-                  {a.tags.length > 0 && (
-                    <div className="mb-1 flex flex-wrap gap-1">
-                      {a.tags.map((t) => (
-                        <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200">{t}</span>
-                      ))}
-                    </div>
-                  )}
-                  {a.note && <p className="text-sm">{a.note}</p>}
-                </div>
-              </motion.div>
-            ))}
+            {todays.map((a) => {
+              const hour = new Date(a.createdAt).getHours();
+              const dp = getDaypartFromHour(hour);
+              const badge = dp === 'morning' ? <Sun className="h-4 w-4"/> : dp === 'afternoon' ? <Sunset className="h-4 w-4"/> : dp === 'evening' ? <Sunset className="h-4 w-4"/> : <Moon className="h-4 w-4"/>;
+              return (
+                <motion.div
+                  key={a.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.3 }}
+                  className="rounded-xl border border-black/10 dark:border-white/10 p-3 bg-white/70 dark:bg-neutral-800/70"
+                >
+                  <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+                    <span className="inline-flex items-center gap-2">{badge} {new Date(a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><CheckCircle2 className="h-4 w-4" /> logged</span>
+                  </div>
+                  <div className="mt-1 text-gray-800 dark:text-gray-100">
+                    {a.tags.length > 0 && (
+                      <div className="mb-1 flex flex-wrap gap-1">
+                        {a.tags.map((t) => (
+                          <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200">{t}</span>
+                        ))}
+                      </div>
+                    )}
+                    {a.note && <p className="text-sm">{a.note}</p>}
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       </div>
