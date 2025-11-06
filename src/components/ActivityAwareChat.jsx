@@ -1,320 +1,165 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Activity, Mic, Square, Volume2, VolumeX } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const CHAT_KEY = 'mindmate_chat';
-const ACT_KEY = 'mindmate_activities';
+const ACTIVITY_KEY = 'mindmate_activities';
 
-function useOnlineStatus() {
-  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+function todayISO(d = new Date()) { return d.toISOString().slice(0, 10); }
+
+function useLocalStorageArray(key, initial = []) {
+  const [data, setData] = useState(initial);
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
-    };
-  }, []);
-  return online;
-}
-
-function load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-function summarizeTodayActivities(list) {
-  const today = new Date().toISOString().slice(0, 10);
-  const todays = list.filter((i) => i.date === today);
-  if (todays.length === 0) return null;
-  const tags = Array.from(new Set(todays.flatMap((i) => i.tags || [])));
-  const note = todays.find((i) => i.note)?.note;
-  return { tags, note, count: todays.length, all: todays };
-}
-
-function pickEmojiFromSummaryAndText(summary, userText) {
-  const emojis = [];
-  const t = (userText || '').toLowerCase();
-  const tags = summary?.tags || [];
-  if (tags.includes('Workout') || tags.includes('Walk')) emojis.push('💪');
-  if (tags.includes('Meditation')) emojis.push('🧘');
-  if (tags.includes('Work') || tags.includes('Study')) emojis.push('📚');
-  if (tags.includes('Social')) emojis.push('🤝');
-  if (tags.includes('Rest')) emojis.push('😴');
-  if (t.includes('tired') || t.includes('sleep')) emojis.push('😴');
-  if (t.includes('anx') || t.includes('worry') || t.includes('stress')) emojis.push('🫶');
-  if (t.includes('happy') || t.includes('good')) emojis.push('😊');
-  if (t.includes('sad') || t.includes('down')) emojis.push('💙');
-  const unique = Array.from(new Set(emojis));
-  return unique.slice(0, 2).join(' ');
-}
-
-function buildDetails(summary) {
-  if (!summary) return 'I don’t have any activities for today yet. You can add a couple and I’ll summarize them here.';
-  const parts = [];
-  const tagText = summary.tags.length > 0 ? summary.tags.join(', ') : 'no tags logged';
-  parts.push(`You logged ${summary.count} entr${summary.count === 1 ? 'y' : 'ies'} today: ${tagText}.`);
-  if (summary.note) parts.push(`Your note: "${summary.note}"`);
-  const last = summary.all.slice().sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt))[0];
-  if (last) parts.push(`Most recent at ${new Date(last.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`);
-  return parts.join(' ');
-}
-
-function detectIntent(userText) {
-  const t = (userText || '').toLowerCase();
-  if (/what (did|have) i do( today)?/.test(t) || t.includes('summary') || t.includes('details') || t.includes('show my activities') || t.includes('list my activities')) {
-    return 'details';
-  }
-  return 'chat';
-}
-
-function friendlyReply(userText, activitiesSummary) {
-  // Intent: details
-  if (detectIntent(userText) === 'details') {
-    return buildDetails(activitiesSummary);
-  }
-
-  const baseTemplates = [
-    'I’m here with you. Let’s keep it gentle.',
-    'Thanks for sharing — one small step is enough.',
-    'I’m proud of you for showing up. We’ll take it slow.',
-  ];
-  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  let base = pick(baseTemplates);
-
-  if (activitiesSummary) {
-    const { tags = [], note } = activitiesSummary;
-    if (tags.includes('Workout') || tags.includes('Walk')) {
-      base += ' Your body got some movement today — nice job.';
-    }
-    if (tags.includes('Meditation')) {
-      base += ' That moment of stillness can really support you.';
-    }
-    if (tags.includes('Work') || tags.includes('Study')) {
-      base += ' You showed up for your responsibilities; that counts.';
-    }
-    if (tags.includes('Social')) {
-      base += ' Connection can be nourishing — even small moments.';
-    }
-    if (tags.includes('Rest')) {
-      base += ' Rest is productive; I’m glad you listened to your energy.';
-    }
-    if (note) {
-      base += ' I remember you noted: "' + note.slice(0, 120) + (note.length > 120 ? '…' : '') + '"';
-    }
-  }
-
-  const t = userText.toLowerCase();
-  if (t.includes('tired') || t.includes('exhaust')) base += ' Let’s keep things easy — breathing and soft focus.';
-  if (t.includes('anx') || t.includes('worry')) base += ' You’re safe here. I’m with you.';
-  if (t.includes('sad') || t.includes('down')) base += ' Your feelings matter, and I’m holding space for them.';
-
-  const emoji = pickEmojiFromSummaryAndText(activitiesSummary, userText);
-  if (emoji) base += ` ${emoji}`;
-  return base;
+    try { const raw = localStorage.getItem(key); if (raw) setData(JSON.parse(raw)); } catch {}
+  }, [key]);
+  const save = (next) => { setData(next); try { localStorage.setItem(key, JSON.stringify(next)); } catch {} };
+  return [data, save];
 }
 
 export default function ActivityAwareChat() {
-  const online = useOnlineStatus();
-  const [messages, setMessages] = useState(() => load(CHAT_KEY, [
-    { role: 'assistant', content: 'Hey, I’m here. Want to settle in together for a moment?' },
-  ]));
+  const [chat, setChat] = useLocalStorageArray(CHAT_KEY, []);
+  const [activities] = useLocalStorageArray(ACTIVITY_KEY, []);
   const [input, setInput] = useState('');
-  const [activities, setActivities] = useState(() => load(ACT_KEY, []));
   const [listening, setListening] = useState(false);
-  const [voiceReply, setVoiceReply] = useState(true);
-  const [woke, setWoke] = useState(false);
-  const recRef = useRef(null);
 
-  const summary = useMemo(() => summarizeTodayActivities(activities), [activities]);
+  const recognitionRef = useRef(null);
 
+  // Summarize today's activities briefly
+  const todaySummary = useMemo(() => {
+    const t = todayISO();
+    const list = activities.filter(a => a.date === t);
+    if (list.length === 0) return 'No activities logged yet today.';
+    const tagCounts = list.flatMap(a => a.tags).reduce((acc, t) => (acc[t]=(acc[t]||0)+1, acc), {});
+    const parts = Object.entries(tagCounts).map(([k,v])=>`${k} x${v}`);
+    return `Today: ${parts.join(', ')}${list.some(a=>a.note) ? ' + notes.' : '.'}`;
+  }, [activities]);
+
+  // Web Speech API for chat input only (distinct from wake-word listener)
   useEffect(() => {
-    save(CHAT_KEY, messages);
-  }, [messages]);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    const r = new SpeechRecognition();
+    r.continuous = false;
+    r.interimResults = true;
+    r.lang = 'en-US';
+    recognitionRef.current = r;
 
-  useEffect(() => {
-    const update = () => setActivities(load(ACT_KEY, []));
-    window.addEventListener('mindmate-activities-updated', update);
-    const onStorage = (e) => { if (e.key === ACT_KEY) update(); };
-    window.addEventListener('storage', onStorage);
+    let interim = '';
+
+    const start = () => {
+      try { r.start(); setListening(true); } catch {}
+    };
+    const stop = () => { try { r.stop(); } catch {}; setListening(false); };
+
+    r.onresult = (e) => {
+      let final = '';
+      interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) final += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      if (interim) setInput(interim);
+      if (final) {
+        setInput('');
+        stop();
+        // Auto-respond when voice captures a final transcript
+        respond(final, /*fromVoice*/ true);
+      }
+    };
+    r.onend = () => setListening(false);
+
+    const onWake = () => start();
+    window.addEventListener('mindmate-wake', onWake);
     return () => {
-      window.removeEventListener('mindmate-activities-updated', update);
-      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('mindmate-wake', onWake);
+      try { r.abort(); } catch {}
     };
   }, []);
 
-  // Wake word hook: start listening when "mindmate-wake" is dispatched
-  useEffect(() => {
-    const onWake = () => {
-      setWoke(true);
-      // Hide indicator after a short moment
-      setTimeout(() => setWoke(false), 3000);
-      if (!listening) startListening();
-    };
-    window.addEventListener('mindmate-wake', onWake);
-    return () => window.removeEventListener('mindmate-wake', onWake);
-  }, [listening]);
-
-  function speak(text) {
-    try {
-      if (!voiceReply || !('speechSynthesis' in window)) return;
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 1;
-      utter.pitch = 1;
-      utter.lang = 'en-US';
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utter);
-    } catch {}
-  }
-
-  const send = (textOverride) => {
-    const text = (textOverride ?? input).trim();
-    if (!text) return;
-    setMessages((m) => [...m, { role: 'user', content: text }]);
-    setInput('');
-
-    const reply = friendlyReply(text, summary);
-    setTimeout(() => {
-      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
-      speak(reply);
-    }, 380);
+  const speakIfAllowed = (text, fromVoice) => {
+    // Respect: don't speak while texting; only speak when the user spoke
+    if (!fromVoice) return;
+    try { window.speechSynthesis.cancel(); } catch {}
+    const u = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(u);
   };
 
-  const startListening = () => {
+  const BASE = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '') || (window.location.origin.replace(':3000', ':8000'));
+
+  const fetchInstantAnswer = async (q) => {
     try {
-      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) return alert('Voice recognition is not supported in this browser.');
-      const rec = new SR();
-      rec.lang = 'en-US';
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
-      rec.onresult = (e) => {
-        const transcript = Array.from(e.results).map(r => r[0]?.transcript).join(' ').trim();
-        if (transcript) {
-          setInput(transcript);
-          send(transcript);
-        }
-      };
-      rec.onerror = () => setListening(false);
-      rec.onend = () => setListening(false);
-      recRef.current = rec;
-      setListening(true);
-      rec.start();
-    } catch {
-      setListening(false);
+      const res = await fetch(`${BASE}/api/answer?q=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error(`Bad status ${res.status}`);
+      const data = await res.json();
+      return data;
+    } catch (e) {
+      return { answer: null, source_url: null, error: e.message };
     }
   };
 
-  const stopListening = () => {
-    try {
-      recRef.current?.stop();
-    } catch {}
-    setListening(false);
+  const respond = async (message, fromVoice = false) => {
+    const lower = message.toLowerCase();
+    let reply = '';
+    let source = null;
+
+    if (lower.includes('what did i do') || lower.includes('summary')) {
+      reply = `Here's your day so far: ${todaySummary} 😊`;
+    } else if (lower.includes('details')) {
+      reply = `Details for today:\n- ${todaySummary}\n- Energy: consider hydration and a short walk. 🚶`;
+    } else {
+      // General questions → try web instant answer via backend
+      const web = await fetchInstantAnswer(message);
+      if (web && web.answer) {
+        reply = `${web.answer}${web.source_url ? `\nSource: ${web.source_url}` : ''}`;
+        source = web.source_url || null;
+      } else {
+        reply = `I couldn't find a concise answer right now. Try rephrasing or ask for a summary. 🔎`;
+      }
+    }
+
+    const next = [...chat, { role: 'user', content: message }, { role: 'assistant', content: reply }];
+    setChat(next);
+    speakIfAllowed(reply, fromVoice);
+  };
+
+  const onSend = async () => {
+    const msg = input.trim();
+    if (!msg) return;
+    setInput('');
+    await respond(msg, /*fromVoice*/ false);
   };
 
   return (
-    <section id="chat" className="py-14">
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center gap-2"><Activity className="h-5 w-5"/> Activity-Aware Chat</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setVoiceReply(v => !v)}
-              className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition ${voiceReply ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20' : 'bg-gray-500/10 text-gray-700 dark:text-gray-300 border-gray-500/20'}`}
-              title={voiceReply ? 'Voice replies on' : 'Voice replies off'}
-            >
-              {voiceReply ? <Volume2 className="h-4 w-4"/> : <VolumeX className="h-4 w-4"/>}
-              {voiceReply ? 'Voice: On' : 'Voice: Off'}
-            </button>
-            <span
-              className={`inline-flex items-center gap-2 text-xs px-2.5 py-1 rounded-full border ${
-                online
-                  ? 'bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/20'
-                  : 'bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20'
-              }`}
-              title={online ? 'Online' : 'Offline — messages are saved locally'}
-            >
-              <span className={`h-2 w-2 rounded-full ${online ? 'bg-green-500' : 'bg-red-500'}`} />
-              {online ? 'Online' : 'Offline'}
-            </span>
-          </div>
-        </div>
-        <p className="text-gray-600 dark:text-gray-400 mb-4">Say “Hey MindMate” to start hands‑free, then speak your message. You can also type.</p>
-
-        <div className="rounded-2xl border border-black/10 dark:border-white/10 bg-white/60 dark:bg-neutral-900/60 backdrop-blur p-4">
-          {woke && (
-            <div className="mb-2 text-xs inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Listening…
-            </div>
-          )}
-          {summary && (
-            <div className="mb-3 text-xs text-gray-700 dark:text-gray-300">
-              <span className="font-medium">Today:</span>{' '}
-              {summary.tags && summary.tags.length > 0 ? summary.tags.join(', ') : '—'}
-              {summary.note ? ` — “${summary.note.slice(0, 60)}${summary.note.length > 60 ? '…' : ''}”` : ''}
-            </div>
-          )}
-          <div className="h-64 overflow-y-auto space-y-3 pr-1">
-            <AnimatePresence initial={false}>
-              {messages.map((m, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
-                    m.role === 'user'
-                      ? 'ml-auto bg-gray-900 text-white dark:bg-white dark:text-gray-900'
-                      : 'bg-gray-100 text-gray-800 dark:bg-neutral-800 dark:text-gray-100'
-                  }`}
-                >
-                  {m.content}
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              onClick={listening ? stopListening : startListening}
-              className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border transition ${listening ? 'bg-red-600 text-white border-red-600' : 'bg-white dark:bg-neutral-800 text-gray-800 dark:text-gray-100 border-black/10 dark:border-white/10'}`}
-              title={listening ? 'Stop voice input' : 'Start voice input'}
-            >
-              {listening ? <Square className="h-4 w-4"/> : <Mic className="h-4 w-4"/>}
-              {listening ? 'Stop' : 'Speak'}
-            </button>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && send()}
-              placeholder="Type a message or use voice…"
-              className="flex-1 bg-white dark:bg-neutral-800 border border-black/10 dark:border-white/10 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500/40"
-            />
-            <button
-              onClick={() => send()}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-tr from-purple-500 via-blue-500 to-amber-500 text-white shadow hover:opacity-90 transition"
-            >
-              <Send className="h-4 w-4" />
-              Send
-            </button>
-          </div>
-          {!online && (
-            <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">You’re offline. Your chat is saved on this device and will be here when you’re back online.</p>
-          )}
+    <div className="rounded-2xl p-6 bg-white/80 dark:bg-white/10 backdrop-blur border border-white/40 shadow-sm flex flex-col">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Chat</h2>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`px-2 py-0.5 rounded-full ${listening ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-800'}`}>{listening ? 'Listening…' : 'Idle'}</span>
+          <button onClick={()=>{ try{recognitionRef.current && recognitionRef.current.start(); setListening(true);}catch{} }} className="px-2 py-1 rounded border">Speak</button>
+          <button onClick={()=>{ try{recognitionRef.current && recognitionRef.current.stop(); setListening(false);}catch{} }} className="px-2 py-1 rounded border">Stop</button>
         </div>
       </div>
-    </section>
+
+      <div className="mt-3 flex-1 min-h-[200px] overflow-auto space-y-2">
+        {chat.length === 0 && (
+          <div className="text-sm text-gray-600 dark:text-gray-300">Ask about your day, or anything on the web. Try “What is intermittent fasting?”</div>
+        )}
+        {chat.map((m, i) => (
+          <div key={i} className={`px-3 py-2 rounded-md max-w-[85%] ${m.role==='user' ? 'bg-emerald-600 text-white self-end ml-auto' : 'bg-white border'}`}>
+            {m.content}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <input
+          value={input}
+          onChange={(e)=>setInput(e.target.value)}
+          onKeyDown={(e)=>{ if (e.key==='Enter') onSend(); }}
+          placeholder="Type a message or say “Hey MindMate” to dictate"
+          className="flex-1 rounded-md border bg-white/70 dark:bg-white/5 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        <button onClick={onSend} className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700">Send</button>
+      </div>
+    </div>
   );
 }

@@ -1,123 +1,88 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-// Lightweight wake word listener using Web Speech API (where supported).
-// It continuously listens for the phrase "hey mindmate" (case-insensitive).
-// When detected, it dispatches a CustomEvent "mindmate-wake" and speaks a short chime.
-// This is a best-effort, browser-based approach (no cloud processing). It pauses
-// when the page is hidden to avoid unnecessary microphone use.
-
-function isSpeechRecognitionAvailable() {
-  return (
-    typeof window !== 'undefined' &&
-    (window.SpeechRecognition || window.webkitSpeechRecognition)
-  );
-}
-
+// WakeWordListener: lightweight continuous listener for the phrase "hey mindmate".
+// On detection, it dispatches a CustomEvent("mindmate-wake") on window and gives a short audio cue.
 export default function WakeWordListener() {
-  const recRef = useRef(null);
+  const recognitionRef = useRef(null);
   const [active, setActive] = useState(false);
-  const [supported, setSupported] = useState(false);
 
   useEffect(() => {
-    setSupported(!!isSpeechRecognitionAvailable());
-  }, []);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return; // Unsupported
 
-  useEffect(() => {
-    if (!supported) return;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
 
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SR();
-    recRef.current = rec;
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = 'en-US';
-
-    let started = false;
+    let stoppedByVisibility = false;
 
     const start = () => {
-      if (started) return;
       try {
-        rec.start();
-        started = true;
+        recognition.start();
         setActive(true);
-      } catch (e) {
-        // start may throw if called too soon; swallow
+      } catch {
+        // start may throw if already started
       }
     };
 
     const stop = () => {
-      try { rec.stop(); } catch {}
-      started = false;
+      try {
+        recognition.stop();
+      } catch {}
       setActive(false);
     };
 
-    const onResult = (event) => {
-      let transcript = '';
+    const handleResult = (event) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const res = event.results[i];
-        transcript += res[0].transcript + ' ';
-      }
-      const norm = transcript.toLowerCase();
-      if (norm.includes('hey mindmate') || norm.includes('heymindmate') || norm.includes('hey, mindmate')) {
-        window.dispatchEvent(new CustomEvent('mindmate-wake'));
-        // Provide brief audio feedback using speechSynthesis
-        if ('speechSynthesis' in window) {
-          const u = new SpeechSynthesisUtterance("I'm listening");
-          u.rate = 1.0;
-          window.speechSynthesis.cancel();
-          window.speechSynthesis.speak(u);
+        const transcript = event.results[i][0].transcript.toLowerCase();
+        if (transcript.includes('hey mindmate') || transcript.includes('hey, mindmate')) {
+          window.dispatchEvent(new CustomEvent('mindmate-wake'));
+          // Provide a short listening cue using speech synthesis since this is a voice interaction
+          const utter = new SpeechSynthesisUtterance("I'm listening");
+          try { window.speechSynthesis.cancel(); } catch {}
+          try { window.speechSynthesis.speak(utter); } catch {}
         }
       }
     };
 
-    const onEnd = () => {
-      // Auto-restart when visible
-      if (!document.hidden) start();
+    const handleEnd = () => {
+      // Auto-restart if still visible
+      if (!document.hidden) {
+        setTimeout(() => start(), 400);
+      } else {
+        setActive(false);
+      }
     };
-
-    const onError = () => {
-      // Attempt restart next tick
-      setTimeout(() => {
-        if (!document.hidden) start();
-      }, 1200);
-    };
-
-    rec.addEventListener('result', onResult);
-    rec.addEventListener('end', onEnd);
-    rec.addEventListener('error', onError);
 
     const handleVisibility = () => {
       if (document.hidden) {
+        stoppedByVisibility = true;
         stop();
-      } else {
+      } else if (stoppedByVisibility) {
+        stoppedByVisibility = false;
         start();
       }
     };
 
+    recognition.addEventListener('result', handleResult);
+    recognition.addEventListener('end', handleEnd);
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Kick off after a short delay to allow page to settle
-    const t = setTimeout(() => {
-      if (!document.hidden) start();
-    }, 600);
+    start();
 
     return () => {
-      clearTimeout(t);
+      recognition.removeEventListener('result', handleResult);
+      recognition.removeEventListener('end', handleEnd);
       document.removeEventListener('visibilitychange', handleVisibility);
-      rec.removeEventListener('result', onResult);
-      rec.removeEventListener('end', onEnd);
-      rec.removeEventListener('error', onError);
-      try { rec.stop(); } catch {}
+      stop();
     };
-  }, [supported]);
-
-  if (!supported) return null;
+  }, []);
 
   return (
-    <div className="fixed right-3 bottom-3 z-40 select-none">
-      <div className={`px-3 py-2 rounded-full shadow-md text-xs font-medium backdrop-blur border ${active ? 'bg-emerald-500/20 text-emerald-900 border-emerald-400/50 dark:text-emerald-100' : 'bg-slate-400/20 text-slate-900 border-slate-300/50 dark:text-slate-100'}`}>
-        Hey MindMate: {active ? 'listening' : 'idle'}
-      </div>
+    <div className="fixed bottom-4 right-4 pointer-events-none select-none">
+      <div className={`px-2 py-1 rounded-full text-xs shadow-md transition-colors ${active ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'}`}>Wake word {active ? 'on' : 'off'}</div>
     </div>
   );
 }
