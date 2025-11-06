@@ -1,90 +1,95 @@
-import { useEffect, useMemo, useState } from 'react';
-import Navbar from './components/Navbar';
-import Hero from './components/Hero';
-import ActivityAwareChat from './components/ActivityAwareChat';
-import DailyActivities from './components/DailyActivities';
+import React, { useEffect, useMemo, useState } from 'react';
+import Navbar from './components/Navbar.jsx';
+import DailyActivities from './components/DailyActivities.jsx';
+import ActivityAwareChat from './components/ActivityAwareChat.jsx';
+import WakeWordListener from './components/WakeWordListener.jsx';
 
-const ACT_KEY = 'mindmate_activities';
-
-function loadActivities() {
+function getLastActivity() {
   try {
-    const raw = localStorage.getItem(ACT_KEY);
-    const data = raw ? JSON.parse(raw) : [];
-    return Array.isArray(data) ? data : [];
+    const raw = localStorage.getItem('mindmate_activities');
+    if (!raw) return null;
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list) || list.length === 0) return null;
+    return list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
   } catch {
-    return [];
+    return null;
   }
 }
 
-function getDaypartFromHour(hour) {
-  if (hour >= 5 && hour < 11) return 'morning';
-  if (hour >= 11 && hour < 17) return 'afternoon';
-  if (hour >= 17 && hour < 21) return 'evening';
+function deriveDaypart(date = new Date()) {
+  const h = date.getHours();
+  if (h >= 5 && h < 12) return 'morning';
+  if (h >= 12 && h < 17) return 'afternoon';
+  if (h >= 17 && h < 21) return 'evening';
   return 'night';
 }
 
-function deriveDaypart(activities) {
-  // Prefer most recent activity time; fallback to current time
-  const last = activities && activities.length > 0
-    ? activities.slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
-    : null;
-  const dt = last ? new Date(last.createdAt) : new Date();
-  return getDaypartFromHour(dt.getHours());
-}
-
-function daypartClasses(dp) {
-  switch (dp) {
+function daypartClasses(part) {
+  switch (part) {
     case 'morning':
-      return 'from-amber-100 via-sky-100 to-white dark:from-amber-950/40 dark:via-sky-950/30 dark:to-neutral-950';
+      return 'from-amber-200 via-rose-100 to-sky-100';
     case 'afternoon':
-      return 'from-blue-50 via-violet-50 to-white dark:from-blue-950/30 dark:via-violet-950/30 dark:to-neutral-950';
+      return 'from-sky-200 via-indigo-100 to-teal-100';
     case 'evening':
-      return 'from-purple-50 via-pink-50 to-white dark:from-purple-950/30 dark:via-pink-950/30 dark:to-neutral-950';
-    case 'night':
+      return 'from-orange-200 via-pink-100 to-purple-200';
     default:
-      return 'from-neutral-900 via-neutral-950 to-black dark:from-neutral-900 dark:via-neutral-950 dark:to-black';
+      return 'from-slate-900 via-slate-800 to-indigo-900';
   }
 }
 
-function daypartEmoji(dp) {
-  return dp === 'morning' ? '🌅' : dp === 'afternoon' ? '🌤️' : dp === 'evening' ? '🌇' : '🌙';
+function daypartEmoji(part) {
+  switch (part) {
+    case 'morning':
+      return '🌅';
+    case 'afternoon':
+      return '🌤️';
+    case 'evening':
+      return '🌇';
+    default:
+      return '🌙';
+  }
 }
 
 export default function App() {
-  const [activities, setActivities] = useState(() => loadActivities());
-  const daypart = useMemo(() => deriveDaypart(activities), [activities]);
+  const [lastActivity, setLastActivity] = useState(getLastActivity());
 
   useEffect(() => {
-    const sync = () => setActivities(loadActivities());
-    window.addEventListener('mindmate-activities-updated', sync);
+    const onUpdate = () => setLastActivity(getLastActivity());
+    window.addEventListener('mindmate-activities-updated', onUpdate);
     window.addEventListener('storage', (e) => {
-      if (e.key === ACT_KEY) sync();
+      if (e.key === 'mindmate_activities') onUpdate();
     });
     return () => {
-      window.removeEventListener('mindmate-activities-updated', sync);
+      window.removeEventListener('mindmate-activities-updated', onUpdate);
     };
   }, []);
 
+  const daypart = useMemo(() => {
+    const ref = lastActivity?.createdAt ? new Date(lastActivity.createdAt) : new Date();
+    return deriveDaypart(ref);
+  }, [lastActivity]);
+
   return (
-    <div className={`min-h-screen bg-gradient-to-b ${daypartClasses(daypart)} transition-colors`}> 
+    <div className={`min-h-screen bg-gradient-to-br ${daypartClasses(daypart)} transition-colors duration-500`}> 
+      <WakeWordListener />
       <Navbar />
-      <main>
-        <section className="relative">
-          <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-            <div className="mt-3 mb-2 rounded-xl border border-black/10 dark:border-white/10 bg-white/60 dark:bg-neutral-900/60 backdrop-blur px-4 py-2 flex items-center gap-3">
-              <span className="text-xl" role="img" aria-label="daypart">{daypartEmoji(daypart)}</span>
-              <p className="text-sm text-gray-800 dark:text-gray-200">
-                Your layout adapts to your day — right now it feels like <span className="font-semibold capitalize">{daypart}</span>.
-              </p>
-            </div>
+
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-sm font-medium text-slate-700 dark:text-slate-200 bg-white/60 dark:bg-slate-800/60 rounded-full px-3 py-1 shadow-sm">
+            <span className="mr-2">{daypartEmoji(daypart)}</span>
+            <span className="capitalize">Good {daypart}</span>
           </div>
-          <Hero />
-        </section>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <div className="text-xs text-slate-600/80 dark:text-slate-300/80">
+            Say “Hey MindMate” to start speaking hands‑free
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <DailyActivities />
           <ActivityAwareChat />
         </div>
-      </main>
+      </div>
     </div>
   );
 }

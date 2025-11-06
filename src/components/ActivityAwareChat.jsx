@@ -135,6 +135,7 @@ export default function ActivityAwareChat() {
   const [activities, setActivities] = useState(() => load(ACT_KEY, []));
   const [listening, setListening] = useState(false);
   const [voiceReply, setVoiceReply] = useState(true);
+  const [woke, setWoke] = useState(false);
   const recRef = useRef(null);
 
   const summary = useMemo(() => summarizeTodayActivities(activities), [activities]);
@@ -153,6 +154,18 @@ export default function ActivityAwareChat() {
       window.removeEventListener('storage', onStorage);
     };
   }, []);
+
+  // Wake word hook: start listening when "mindmate-wake" is dispatched
+  useEffect(() => {
+    const onWake = () => {
+      setWoke(true);
+      // Hide indicator after a short moment
+      setTimeout(() => setWoke(false), 3000);
+      if (!listening) startListening();
+    };
+    window.addEventListener('mindmate-wake', onWake);
+    return () => window.removeEventListener('mindmate-wake', onWake);
+  }, [listening]);
 
   function speak(text) {
     try {
@@ -238,9 +251,15 @@ export default function ActivityAwareChat() {
             </span>
           </div>
         </div>
-        <p className="text-gray-600 dark:text-gray-400 mb-4">Speak or type. I’ll respond with empathetic text, emojis, and voice.</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-4">Say “Hey MindMate” to start hands‑free, then speak your message. You can also type.</p>
 
         <div className="rounded-2xl border border-black/10 dark:border-white/10 bg-white/60 dark:bg-neutral-900/60 backdrop-blur p-4">
+          {woke && (
+            <div className="mb-2 text-xs inline-flex items-center gap-2 px-2.5 py-1 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Listening…
+            </div>
+          )}
           {summary && (
             <div className="mb-3 text-xs text-gray-700 dark:text-gray-300">
               <span className="font-medium">Today:</span>{' '}
